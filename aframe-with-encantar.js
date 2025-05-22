@@ -8,7 +8,7 @@
 
 /* Usage of the indicated versions is encouraged */
 __THIS_PLUGIN_HAS_BEEN_TESTED_WITH__({
-    'encantar.js': { version: '0.4.1' },
+    'encantar.js': { version: '0.4.3' },
         'A-Frame': { version: '1.6.0' }
 });
 
@@ -183,12 +183,13 @@ AFRAME.registerSystem('ar', Object.assign(ARBaseSystem(), {
         }
 
         // initial setup
-        scene.setAttribute('vr-mode-ui', { enabled: false });
+        scene.setAttribute('xr-mode-ui', { enabled: false });
+        scene.setAttribute('vr-mode-ui', { enabled: false }); // deprecated
         scene.setAttribute('embedded', true);
         scene.setAttribute('renderer', { alpha: true });
 
         // pause the scene until we're ready
-        scene.addEventListener('ar-started', () => {
+        scene.addEventListener('arready', () => {
             scene.play();
         });
         scene.addEventListener('loaded', () => {
@@ -251,7 +252,8 @@ AFRAME.registerSystem('ar', Object.assign(ARBaseSystem(), {
 
             // we're done!
             const scene = this.el;
-            scene.emit('ar-started', { ar: this });
+            scene.emit('arready', { ar: this });
+            scene.emit('ar-started', { ar: this }); // backwards compatibility with 0.3.0 - 0.4.1
             return session;
         })
         .catch(error => {
@@ -308,6 +310,8 @@ AFRAME.registerSystem('ar', Object.assign(ARBaseSystem(), {
             this.viewer = null;
             this.frame = null;
             this.pointers.length = 0;
+
+            scene.emit('arsessionended', { ar: this });
         });
 
         session.viewport.addEventListener('resize', () => {
@@ -488,7 +492,6 @@ AFRAME.registerComponent('encantar', ARComponent({
     init()
     {
         this._started = false;
-        this.el.setAttribute('xr-mode-ui', { enabled: false });
     },
 
     play()
@@ -915,10 +918,10 @@ AFRAME.registerComponent('ar-image-tracker', ARComponent({
 
     /* async */ tracker()
     {
-        const tracker = AR.Tracker.Image();
+        const tracker = AR.Tracker.Image({
+            resolution: this.data.resolution
+        });
         const referenceImages = [];
-
-        tracker.resolution = this.data.resolution;
 
         for(const child of this.el.children) {
             if(child.components !== undefined) {
@@ -930,6 +933,11 @@ AFRAME.registerComponent('ar-image-tracker', ARComponent({
             }
         }
 
+        const ar = this.ar;
+        const scene = this.el.sceneEl;
+        tracker.addEventListener('targetfound', ev => scene.emit('artargetfound', { ar, referenceImage: ev.referenceImage }));
+        tracker.addEventListener('targetlost', ev => scene.emit('artargetlost', { ar, referenceImage: ev.referenceImage }));
+
         return tracker.database.add(referenceImages).then(() => tracker);
     },
 
@@ -938,6 +946,9 @@ AFRAME.registerComponent('ar-image-tracker', ARComponent({
 AFRAME.registerPrimitive('ar-image-tracker', {
     defaultComponents: {
         'ar-image-tracker': {}
+    },
+    mappings: {
+        'resolution': 'ar-image-tracker.resolution',
     }
 });
 
@@ -968,6 +979,7 @@ AFRAME.registerComponent('ar-reference-image', ARComponent({
             throw new Error('Unspecified src attribute of ar-reference-image');
 
         const img = new Image();
+        img.crossOrigin = 'anonymous';
         img.src = this.data.src;
 
         return {
